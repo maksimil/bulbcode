@@ -1,7 +1,9 @@
+use blub::detect;
 use image::io::Reader as ImageReader;
 use image::Luma;
 use table::Table;
 
+pub mod blub;
 pub mod table;
 
 fn is_key_color(px: &Luma<u8>) -> bool {
@@ -21,9 +23,10 @@ fn main() {
     let mut graytable = Table::new(width, height, &false);
 
     for j in 0..height {
-        println!();
         for i in 0..width {
             graytable[(i, j)] = is_key_color(image.get_pixel(i as u32, j as u32));
         }
     }
+
+    detect(&graytable);
 }
