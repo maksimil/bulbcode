@@ -1,23 +1,48 @@
-use crate::table::Table;
+use std::num::Wrapping;
 
-pub struct BlubData {
-    pub data: Table<bool>,
-    pub refpos: (usize, usize),
+use image::Rgb;
 
-    pub pos: (usize, usize),
-    pub dpos: (usize, usize),
+use crate::table::{Table, ToRgb8};
+
+#[derive(Clone)]
+pub enum BlubPx {
+    Unmarked,
+    Outer,
+    Border(usize),
+    Inner(usize),
 }
 
-fn free_neighbours(free: &Table<bool>, (i, j): (usize, usize)) -> Vec<(usize, usize)> {
+const COLORS: [Rgb<u8>; 7] = [
+    Rgb([255, 0, 0]),
+    Rgb([0, 255, 0]),
+    Rgb([0, 0, 255]),
+    Rgb([255, 255, 0]),
+    Rgb([255, 0, 255]),
+    Rgb([0, 255, 255]),
+    Rgb([0, 0, 0]),
+];
+
+impl ToRgb8 for BlubPx {
+    fn to_rgb8(&self) -> Rgb<u8> {
+        match self {
+            BlubPx::Unmarked => false.to_rgb8(),
+            BlubPx::Outer => Rgb([100, 100, 100]),
+            BlubPx::Border(a) => COLORS[a % COLORS.len()],
+            BlubPx::Inner(_) => false.to_rgb8(),
+        }
+    }
+}
+
+const W1: Wrapping<usize> = Wrapping(1);
+
+fn free_neighbours(free: &Table<bool>, (ii, ji): (usize, usize)) -> Vec<(usize, usize)> {
+    let i = Wrapping(ii);
+    let j = Wrapping(ji);
     [
-        (i + 1, j + 1),
-        (i + 1, j),
-        (i + 1, j - 1),
-        (i, j + 1),
-        (i, j - 1),
-        (i - 1, j + 1),
-        (i - 1, j),
-        (i - 1, j - 1),
+        ((i + W1).0, ji),
+        ((i - W1).0, ji),
+        (ii, (j + W1).0),
+        (ii, (j - W1).0),
     ]
     .iter()
     .filter_map(|p| {
@@ -40,50 +65,65 @@ pub fn relimit<T: Ord>(lims: (T, T), v: T) -> (T, T) {
     }
 }
 
-pub fn detect(graytable: &Table<bool>) -> Vec<BlubData> {
-    let mut blubs = Vec::new();
+pub fn detect(graytable: &Table<bool>) -> Table<BlubPx> {
+    let mut data = graytable.same_size(&BlubPx::Unmarked);
 
-    let mut free = graytable.clone();
+    // detecting borders
+    let count = {
+        let mut count = 0;
+        let mut free = graytable.clone();
 
-    while let Some(p) = free.find(|v| *v) {
-        let mut blub = BlubData {
-            data: free.same_size(&false),
-            refpos: (0, 0),
-            pos: p,
-            dpos: p,
-        };
+        while let Some(p) = free.find(|v| *v) {
+            let mut stack = Vec::new();
+
+            free[p] = false;
+
+            data[p] = BlubPx::Border(count);
+            stack.push(p);
+
+            while let Some(p) = stack.pop() {
+                for n in free_neighbours(&free, p) {
+                    free[n] = false;
+
+                    data[n] = BlubPx::Border(count);
+                    stack.push(n);
+                }
+            }
+
+            count += 1;
+        }
+
+        count
+    };
+
+    // marking outer region
+    {
+        let mut free = graytable.clone();
+
+        for i in 0..free.width() {
+            for j in 0..free.height() {
+                free[(i, j)] = !free[(i, j)];
+            }
+        }
 
         let mut stack = Vec::new();
 
-        stack.push(p);
+        free[(0, 0)] = false;
+
+        data[(0, 0)] = BlubPx::Outer;
+        stack.push((0, 0));
 
         while let Some(p) = stack.pop() {
             for n in free_neighbours(&free, p) {
                 free[n] = false;
-                blub.data[n] = true;
 
-                if n.0 < blub.pos.0 {
-                    blub.pos.0 = n.0;
-                } else if n.0 > blub.dpos.0 {
-                    blub.dpos.0 = n.0;
-                }
-
-                if n.1 < blub.pos.1 {
-                    blub.pos.1 = n.1;
-                } else if n.1 > blub.dpos.1 {
-                    blub.dpos.1 = n.1;
-                }
-
+                data[n] = BlubPx::Outer;
                 stack.push(n);
             }
         }
-
-        blubs.push(blub);
     }
 
-    for (n, blub) in blubs.iter().enumerate() {
-        blub.data.save(format!(r"target\blubs\{}.png", n));
-    }
+    data.save(r"target\data.png");
 
-    blubs
+    data
 }

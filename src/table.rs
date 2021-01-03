@@ -21,10 +21,6 @@ impl<T: Clone> Table<T> {
             height,
         }
     }
-
-    pub fn same_size(&self, fill: &T) -> Table<T> {
-        Table::new(self.width(), self.height(), fill)
-    }
 }
 
 impl<T> Table<T> {
@@ -48,6 +44,10 @@ impl<T> Table<T> {
             }
         }
         None
+    }
+
+    pub fn same_size<E: Clone>(&self, fill: &E) -> Table<E> {
+        Table::new(self.width(), self.height(), fill)
     }
 }
 
