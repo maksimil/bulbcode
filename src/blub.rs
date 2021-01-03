@@ -76,6 +76,7 @@ pub fn propagate_border(
     data: &mut Table<BlubPx>,
     borders: &mut Table<bool>,
     bcount: &mut usize,
+    root: &mut TNode,
     p: (usize, usize),
 ) {
     let size = (data.width(), data.height());
@@ -109,12 +110,14 @@ pub fn propagate_border(
         }
     }
 
-    let mut rn = 0;
     for n in pr {
         if data[n] == BlubPx::Unmarked {
+            let rn = root.0.len();
+            root.0.push(TRegion::new());
+
             data[n] = BlubPx::Region(bid, rn);
-            rn += 1;
-            propagate_region(data, borders, bcount, n);
+
+            propagate_region(data, borders, bcount, &mut root.0[rn], n);
         }
     }
 }
@@ -123,6 +126,7 @@ pub fn propagate_region(
     data: &mut Table<BlubPx>,
     borders: &mut Table<bool>,
     bcount: &mut usize,
+    root: &mut TRegion,
     p: (usize, usize),
 ) {
     let size = (data.width(), data.height());
@@ -158,21 +162,47 @@ pub fn propagate_region(
 
     for n in pb {
         if data[n] == BlubPx::Unmarked {
+            let ri = root.0.len();
+            root.0.push(TNode::new());
+
             data[n] = BlubPx::Border(*bcount);
             *bcount += 1;
-            propagate_border(data, borders, bcount, n);
+
+            propagate_border(data, borders, bcount, &mut root.0[ri], n);
         }
     }
 }
 
-pub fn detect(graytable: &Table<bool>) -> Table<BlubPx> {
+#[derive(Debug)]
+pub struct TNode(Vec<TRegion>);
+#[derive(Debug)]
+pub struct TRegion(Vec<TNode>);
+
+impl TNode {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl TRegion {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+}
+
+pub fn detect(graytable: &Table<bool>) -> TRegion {
     let mut data = graytable.same_size(&BlubPx::Unmarked);
 
     data[(0, 0)] = BlubPx::Region(0, 0);
     let mut borders = graytable.clone();
-    propagate_region(&mut data, &mut borders, &mut 1, (0, 0));
+
+    let mut root = TRegion::new();
+
+    propagate_region(&mut data, &mut borders, &mut 1, &mut root, (0, 0));
 
     data.save(r"target\data.png");
 
-    data
+    println!("ROOT:\n{:#?}", root);
+
+    root
 }
