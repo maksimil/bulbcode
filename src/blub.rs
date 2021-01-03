@@ -4,38 +4,45 @@ use image::Rgb;
 
 use crate::table::{Table, ToRgb8};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum BlubPx {
     Unmarked,
-    Outer,
     Border(usize),
-    Inner(usize),
+    Region(usize, usize),
 }
 
-const COLORS: [Rgb<u8>; 7] = [
+const COLORS: [Rgb<u8>; 8] = [
+    Rgb([255, 255, 255]),
     Rgb([255, 0, 0]),
-    Rgb([0, 255, 0]),
-    Rgb([0, 0, 255]),
+    Rgb([255, 165, 0]),
     Rgb([255, 255, 0]),
-    Rgb([255, 0, 255]),
-    Rgb([0, 255, 255]),
-    Rgb([0, 0, 0]),
+    Rgb([0, 128, 0]),
+    Rgb([0, 0, 255]),
+    Rgb([75, 0, 130]),
+    Rgb([238, 130, 238]),
 ];
 
 impl ToRgb8 for BlubPx {
     fn to_rgb8(&self) -> Rgb<u8> {
         match self {
             BlubPx::Unmarked => false.to_rgb8(),
-            BlubPx::Outer => Rgb([100, 100, 100]),
+            BlubPx::Region(a, i) => {
+                let mut c = COLORS[a % COLORS.len()];
+                let f = COLORS[i % COLORS.len()];
+
+                for i in 0..3 {
+                    c.0[i] = (c.0[i] + (255 - c.0[i]) / 2) / 4 * 3 + f.0[i] / 4;
+                }
+                c
+            }
             BlubPx::Border(a) => COLORS[a % COLORS.len()],
-            BlubPx::Inner(_) => false.to_rgb8(),
         }
     }
 }
 
 const W1: Wrapping<usize> = Wrapping(1);
 
-fn free_neighbours(free: &Table<bool>, (ii, ji): (usize, usize)) -> Vec<(usize, usize)> {
+fn neighbours((width, height): (usize, usize), (ii, ji): (usize, usize)) -> Vec<(usize, usize)> {
     let i = Wrapping(ii);
     let j = Wrapping(ji);
     [
@@ -46,7 +53,7 @@ fn free_neighbours(free: &Table<bool>, (ii, ji): (usize, usize)) -> Vec<(usize, 
     ]
     .iter()
     .filter_map(|p| {
-        if p.0 < free.width() && p.1 < free.height() && free[*p] {
+        if p.0 < width && p.1 < height {
             Some(*p)
         } else {
             None
@@ -65,63 +72,105 @@ pub fn relimit<T: Ord>(lims: (T, T), v: T) -> (T, T) {
     }
 }
 
-pub fn detect(graytable: &Table<bool>) -> Table<BlubPx> {
-    let mut data = graytable.same_size(&BlubPx::Unmarked);
+pub fn propagate_border(
+    data: &mut Table<BlubPx>,
+    borders: &mut Table<bool>,
+    bcount: &mut usize,
+    p: (usize, usize),
+) {
+    let size = (data.width(), data.height());
 
-    // detecting borders
-    let count = {
-        let mut count = 0;
-        let mut free = graytable.clone();
-
-        while let Some(p) = free.find(|v| *v) {
-            let mut stack = Vec::new();
-
-            free[p] = false;
-
-            data[p] = BlubPx::Border(count);
-            stack.push(p);
-
-            while let Some(p) = stack.pop() {
-                for n in free_neighbours(&free, p) {
-                    free[n] = false;
-
-                    data[n] = BlubPx::Border(count);
-                    stack.push(n);
-                }
-            }
-
-            count += 1;
-        }
-
-        count
+    let bid = match data[p] {
+        BlubPx::Border(bid) => bid,
+        _ => panic!("Cannot propagate border without a starting point"),
     };
 
-    // marking outer region
-    {
-        let mut free = graytable.clone();
+    let mut pr = Vec::new();
 
-        for i in 0..free.width() {
-            for j in 0..free.height() {
-                free[(i, j)] = !free[(i, j)];
-            }
-        }
+    let mut stack = Vec::new();
+    stack.push(p);
 
-        let mut stack = Vec::new();
-
-        free[(0, 0)] = false;
-
-        data[(0, 0)] = BlubPx::Outer;
-        stack.push((0, 0));
-
-        while let Some(p) = stack.pop() {
-            for n in free_neighbours(&free, p) {
-                free[n] = false;
-
-                data[n] = BlubPx::Outer;
-                stack.push(n);
+    while let Some(p) = stack.pop() {
+        for n in neighbours(size, p) {
+            match data[n] {
+                BlubPx::Unmarked => {
+                    if !borders[n] {
+                        pr.push(n);
+                    } else {
+                        data[n] = BlubPx::Border(bid);
+                        stack.push(n);
+                    }
+                }
+                BlubPx::Border(obid) => {
+                    debug_assert!(bid == obid);
+                }
+                BlubPx::Region(_, _) => (),
             }
         }
     }
+
+    let mut rn = 0;
+    for n in pr {
+        if data[n] == BlubPx::Unmarked {
+            data[n] = BlubPx::Region(bid, rn);
+            rn += 1;
+            propagate_region(data, borders, bcount, n);
+        }
+    }
+}
+
+pub fn propagate_region(
+    data: &mut Table<BlubPx>,
+    borders: &mut Table<bool>,
+    bcount: &mut usize,
+    p: (usize, usize),
+) {
+    let size = (data.width(), data.height());
+
+    let (rid, rn) = match data[p] {
+        BlubPx::Region(rid, rn) => (rid, rn),
+        _ => panic!("Cannot propagate region without a starting point"),
+    };
+
+    let mut pb = Vec::new();
+
+    let mut stack = Vec::new();
+    stack.push(p);
+
+    while let Some(p) = stack.pop() {
+        for n in neighbours(size, p) {
+            match data[n] {
+                BlubPx::Unmarked => {
+                    if borders[n] {
+                        pb.push(n);
+                    } else {
+                        data[n] = BlubPx::Region(rid, rn);
+                        stack.push(n);
+                    }
+                }
+                BlubPx::Region(orid, orn) => {
+                    debug_assert!(rid == orid && rn == orn);
+                }
+                BlubPx::Border(_) => (),
+            }
+        }
+    }
+
+    for n in pb {
+        if data[n] == BlubPx::Unmarked {
+            data[n] = BlubPx::Border(*bcount);
+            *bcount += 1;
+            propagate_border(data, borders, bcount, n);
+        }
+    }
+}
+
+pub fn detect(graytable: &Table<bool>) -> Table<BlubPx> {
+    let mut data = graytable.same_size(&BlubPx::Unmarked);
+
+    data[(0, 0)] = BlubPx::Region(0, 0);
+    let mut borders = graytable.clone();
+    propagate_region(&mut data, &mut borders, &mut 1, (0, 0));
 
     data.save(r"target\data.png");
 
