@@ -28,5 +28,5 @@ fn main() {
         }
     }
 
-    detect(&graytable);
+    println!("{:#?}", detect(&graytable));
 }

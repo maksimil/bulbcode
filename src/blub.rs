@@ -1,43 +1,12 @@
 use std::num::Wrapping;
 
-use image::Rgb;
-
-use crate::table::{Table, ToRgb8};
+use crate::table::Table;
 
 #[derive(Clone, PartialEq)]
 pub enum BlubPx {
     Unmarked,
-    Border(usize),
-    Region(usize, usize),
-}
-
-const COLORS: [Rgb<u8>; 8] = [
-    Rgb([255, 255, 255]),
-    Rgb([255, 0, 0]),
-    Rgb([255, 165, 0]),
-    Rgb([255, 255, 0]),
-    Rgb([0, 128, 0]),
-    Rgb([0, 0, 255]),
-    Rgb([75, 0, 130]),
-    Rgb([238, 130, 238]),
-];
-
-impl ToRgb8 for BlubPx {
-    fn to_rgb8(&self) -> Rgb<u8> {
-        match self {
-            BlubPx::Unmarked => false.to_rgb8(),
-            BlubPx::Region(a, i) => {
-                let mut c = COLORS[a % COLORS.len()];
-                let f = COLORS[i % COLORS.len()];
-
-                for i in 0..3 {
-                    c.0[i] = (c.0[i] + (255 - c.0[i]) / 2) / 4 * 3 + f.0[i] / 4;
-                }
-                c
-            }
-            BlubPx::Border(a) => COLORS[a % COLORS.len()],
-        }
-    }
+    Border,
+    Region,
 }
 
 const W1: Wrapping<usize> = Wrapping(1);
@@ -75,16 +44,10 @@ pub fn relimit<T: Ord>(lims: (T, T), v: T) -> (T, T) {
 pub fn propagate_border(
     data: &mut Table<BlubPx>,
     borders: &mut Table<bool>,
-    bcount: &mut usize,
     root: &mut TNode,
     p: (usize, usize),
 ) {
     let size = (data.width(), data.height());
-
-    let bid = match data[p] {
-        BlubPx::Border(bid) => bid,
-        _ => panic!("Cannot propagate border without a starting point"),
-    };
 
     let mut pr = Vec::new();
 
@@ -93,31 +56,25 @@ pub fn propagate_border(
 
     while let Some(p) = stack.pop() {
         for n in neighbours(size, p) {
-            match data[n] {
-                BlubPx::Unmarked => {
-                    if !borders[n] {
-                        pr.push(n);
-                    } else {
-                        data[n] = BlubPx::Border(bid);
-                        stack.push(n);
-                    }
+            if data[n] == BlubPx::Unmarked {
+                if !borders[n] {
+                    pr.push(n);
+                } else {
+                    data[n] = BlubPx::Border;
+                    stack.push(n);
                 }
-                BlubPx::Border(obid) => {
-                    debug_assert!(bid == obid);
-                }
-                BlubPx::Region(_, _) => (),
             }
         }
     }
 
     for n in pr {
         if data[n] == BlubPx::Unmarked {
-            let rn = root.0.len();
+            let ri = root.0.len();
             root.0.push(TRegion::new());
 
-            data[n] = BlubPx::Region(bid, rn);
+            data[n] = BlubPx::Region;
 
-            propagate_region(data, borders, bcount, &mut root.0[rn], n);
+            propagate_region(data, borders, &mut root.0[ri], n);
         }
     }
 }
@@ -125,16 +82,10 @@ pub fn propagate_border(
 pub fn propagate_region(
     data: &mut Table<BlubPx>,
     borders: &mut Table<bool>,
-    bcount: &mut usize,
     root: &mut TRegion,
     p: (usize, usize),
 ) {
     let size = (data.width(), data.height());
-
-    let (rid, rn) = match data[p] {
-        BlubPx::Region(rid, rn) => (rid, rn),
-        _ => panic!("Cannot propagate region without a starting point"),
-    };
 
     let mut pb = Vec::new();
 
@@ -143,19 +94,13 @@ pub fn propagate_region(
 
     while let Some(p) = stack.pop() {
         for n in neighbours(size, p) {
-            match data[n] {
-                BlubPx::Unmarked => {
-                    if borders[n] {
-                        pb.push(n);
-                    } else {
-                        data[n] = BlubPx::Region(rid, rn);
-                        stack.push(n);
-                    }
+            if data[n] == BlubPx::Unmarked {
+                if borders[n] {
+                    pb.push(n);
+                } else {
+                    data[n] = BlubPx::Region;
+                    stack.push(n);
                 }
-                BlubPx::Region(orid, orn) => {
-                    debug_assert!(rid == orid && rn == orn);
-                }
-                BlubPx::Border(_) => (),
             }
         }
     }
@@ -165,10 +110,9 @@ pub fn propagate_region(
             let ri = root.0.len();
             root.0.push(TNode::new());
 
-            data[n] = BlubPx::Border(*bcount);
-            *bcount += 1;
+            data[n] = BlubPx::Border;
 
-            propagate_border(data, borders, bcount, &mut root.0[ri], n);
+            propagate_border(data, borders, &mut root.0[ri], n);
         }
     }
 }
@@ -193,16 +137,12 @@ impl TRegion {
 pub fn detect(graytable: &Table<bool>) -> TRegion {
     let mut data = graytable.same_size(&BlubPx::Unmarked);
 
-    data[(0, 0)] = BlubPx::Region(0, 0);
+    data[(0, 0)] = BlubPx::Region;
     let mut borders = graytable.clone();
 
     let mut root = TRegion::new();
 
-    propagate_region(&mut data, &mut borders, &mut 1, &mut root, (0, 0));
-
-    data.save(r"target\data.png");
-
-    println!("ROOT:\n{:#?}", root);
+    propagate_region(&mut data, &mut borders, &mut root, (0, 0));
 
     root
 }
