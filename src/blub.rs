@@ -2,13 +2,6 @@ use std::num::Wrapping;
 
 use crate::table::Table;
 
-#[derive(Clone, PartialEq)]
-pub enum BlubPx {
-    Unmarked,
-    Border,
-    Region,
-}
-
 const W1: Wrapping<usize> = Wrapping(1);
 
 fn neighbours((width, height): (usize, usize), (ii, ji): (usize, usize)) -> Vec<(usize, usize)> {
@@ -31,61 +24,13 @@ fn neighbours((width, height): (usize, usize), (ii, ji): (usize, usize)) -> Vec<
     .collect::<Vec<_>>()
 }
 
-pub fn relimit<T: Ord>(lims: (T, T), v: T) -> (T, T) {
-    if lims.0 <= v && v <= lims.1 {
-        lims
-    } else if lims.1 < v {
-        (lims.0, v)
-    } else {
-        (v, lims.1)
-    }
-}
-
-pub fn propagate_border(
-    data: &mut Table<BlubPx>,
-    borders: &mut Table<bool>,
-    root: &mut TNode,
+pub fn propagate_region<T: PartialEq + Clone>(
+    used: &mut Table<bool>,
+    graytable: &Table<T>,
+    root: &mut TNode<T>,
     p: (usize, usize),
 ) {
-    let size = (data.width(), data.height());
-
-    let mut pr = Vec::new();
-
-    let mut stack = Vec::new();
-    stack.push(p);
-
-    while let Some(p) = stack.pop() {
-        for n in neighbours(size, p) {
-            if data[n] == BlubPx::Unmarked {
-                if !borders[n] {
-                    pr.push(n);
-                } else {
-                    data[n] = BlubPx::Border;
-                    stack.push(n);
-                }
-            }
-        }
-    }
-
-    for n in pr {
-        if data[n] == BlubPx::Unmarked {
-            let ri = root.0.len();
-            root.0.push(TRegion::new());
-
-            data[n] = BlubPx::Region;
-
-            propagate_region(data, borders, &mut root.0[ri], n);
-        }
-    }
-}
-
-pub fn propagate_region(
-    data: &mut Table<BlubPx>,
-    borders: &mut Table<bool>,
-    root: &mut TRegion,
-    p: (usize, usize),
-) {
-    let size = (data.width(), data.height());
+    let size = (used.width(), used.height());
 
     let mut pb = Vec::new();
 
@@ -94,55 +39,50 @@ pub fn propagate_region(
 
     while let Some(p) = stack.pop() {
         for n in neighbours(size, p) {
-            if data[n] == BlubPx::Unmarked {
-                if borders[n] {
-                    pb.push(n);
-                } else {
-                    data[n] = BlubPx::Region;
+            if !used[n] {
+                if graytable[n] == root.value {
+                    used[n] = true;
                     stack.push(n);
+                } else {
+                    pb.push(n);
                 }
             }
         }
     }
 
     for n in pb {
-        if data[n] == BlubPx::Unmarked {
-            let ri = root.0.len();
-            root.0.push(TNode::new());
+        if !used[n] {
+            let ri = root.children.len();
+            root.children.push(TNode::new(graytable[n].clone()));
 
-            data[n] = BlubPx::Border;
-
-            propagate_border(data, borders, &mut root.0[ri], n);
+            propagate_region(used, graytable, &mut root.children[ri], n);
         }
     }
 }
 
 #[derive(Debug)]
-pub struct TNode(Vec<TRegion>);
-#[derive(Debug)]
-pub struct TRegion(Vec<TNode>);
+pub struct TNode<T> {
+    pub value: T,
+    pub children: Vec<TNode<T>>,
+}
 
-impl TNode {
-    pub fn new() -> Self {
-        Self(Vec::new())
+impl<T> TNode<T> {
+    pub fn new(value: T) -> TNode<T> {
+        TNode {
+            value,
+            children: Vec::new(),
+        }
     }
 }
 
-impl TRegion {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-}
+pub fn topology<T: PartialEq + Clone>(graytable: &Table<T>, p: (usize, usize)) -> TNode<T> {
+    let mut used = graytable.same_size(&false);
 
-pub fn detect(graytable: &Table<bool>) -> TRegion {
-    let mut data = graytable.same_size(&BlubPx::Unmarked);
+    used[(0, 0)] = true;
 
-    data[(0, 0)] = BlubPx::Region;
-    let mut borders = graytable.clone();
+    let mut root = TNode::new(graytable[(0, 0)].clone());
 
-    let mut root = TRegion::new();
-
-    propagate_region(&mut data, &mut borders, &mut root, (0, 0));
+    propagate_region(&mut used, graytable, &mut root, p);
 
     root
 }

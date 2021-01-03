@@ -1,4 +1,4 @@
-use blub::detect;
+use blub::topology;
 use image::io::Reader as ImageReader;
 use image::Luma;
 use table::Table;
@@ -28,5 +28,5 @@ fn main() {
         }
     }
 
-    println!("{:#?}", detect(&graytable));
+    println!("{:#?}", topology(&graytable, (0, 0)));
 }
